@@ -9,7 +9,7 @@ typedef struct Memory {
     size_t size;
 } Memory;
 
-void extract_javascript(char *html_code) {
+int gfg_extract_javascript(char *html_code, char *path) {
     const char *start_tag = "<code class=\"language-javascript\">";
     const char *end_tag = "</code>";
 
@@ -51,6 +51,8 @@ void extract_javascript(char *html_code) {
                             buf[i++] = '"';
                         } else {
                             fprintf(stderr, "Unknown HTML expression: %s\n", expr_buf);
+                            free(buf);
+                            return 1;
                         }
                         j = 0;
                         expr = false;
@@ -67,22 +69,31 @@ void extract_javascript(char *html_code) {
 
             buf[i] = '\0';
 
-            FILE *file = fopen("output.js", "w");
+            FILE *file = fopen(path, "w");
+            if(file == NULL) {
+                fprintf(stderr, "Failed to write output to file\n");
+                free(buf);
+                return 1;
+            }
+
             fprintf(file, "%s", buf);
             fclose(file);
 
-            printf("Saved to file output.js\n");
+            printf("Saved to file %s\n", path);
 
             free(buf);
         } else {
             fprintf(stderr, "No end tag found.\n");
+            return 1;
         }
     } else {
         fprintf(stderr, "No start tag found.\n");
+        return 1;
     }
+    return 0;
 }
 
-size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
+size_t gfg_write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t total_size = size * nmemb;
     Memory *mem = (Memory *)userp;
 
@@ -100,28 +111,29 @@ size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
     return total_size;
 }
 
-int main() {
-	CURL *curl;
+int gfg_scrape(char *url, char *path) {
+    CURL *curl;
     CURLcode res;
     Memory chunk = {0};
 
     curl = curl_easy_init();
     if (curl) {
-        curl_easy_setopt(curl, CURLOPT_URL, "https://www.geeksforgeeks.org/create-a-form-using-reactjs/");
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, gfg_write_callback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
         res = curl_easy_perform(curl);
 
         if (res != CURLE_OK) {
             fprintf(stderr, "cURL error: %s\n", curl_easy_strerror(res));
         } else {
-            extract_javascript(chunk.data);
+            return gfg_extract_javascript(chunk.data, path);
         }
 
         curl_easy_cleanup(curl);
         free(chunk.data);
     } else {
         fprintf(stderr, "Failed to initialize libcurl\n");
+        return 1;
     }
 	return 0;
 }
