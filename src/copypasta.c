@@ -23,7 +23,7 @@ int gfg_extract_javascript(char *html_code, char *path) {
         if (end) {
             buf = malloc((end - start + 1) * sizeof(char));
             if (buf == NULL) {
-                fprintf(stderr, "Not enough memory to store buffer.\n");
+                fprintf(stderr, "[ERROR] Not enough memory to store buffer.\n");
             }
             char expr_buf[5];
 
@@ -50,7 +50,7 @@ int gfg_extract_javascript(char *html_code, char *path) {
                         } else if(strcmp(expr_buf, "quot") == 0) {
                             buf[i++] = '"';
                         } else {
-                            fprintf(stderr, "Unknown HTML expression: %s\n", expr_buf);
+                            fprintf(stderr, "[ERROR] Unknown HTML expression: %s\n", expr_buf);
                             free(buf);
                             return 1;
                         }
@@ -71,7 +71,7 @@ int gfg_extract_javascript(char *html_code, char *path) {
 
             FILE *file = fopen(path, "w");
             if(file == NULL) {
-                fprintf(stderr, "Failed to write output to file\n");
+                fprintf(stderr, "[ERROR] Failed to write output to file\n");
                 free(buf);
                 return 1;
             }
@@ -79,15 +79,81 @@ int gfg_extract_javascript(char *html_code, char *path) {
             fprintf(file, "%s", buf);
             fclose(file);
 
-            printf("Saved to file %s\n", path);
+            printf("[INFO] Saved to file %s\n", path);
 
             free(buf);
         } else {
-            fprintf(stderr, "No end tag found.\n");
+            fprintf(stderr, "[ERROR] No end tag found.\n");
             return 1;
         }
     } else {
-        fprintf(stderr, "No start tag found.\n");
+        fprintf(stderr, "[ERROR] No start tag found.\n");
+        return 1;
+    }
+    return 0;
+}
+
+int gfg_extract_table_links(char *html_code, char *path) {
+    const char *start_tag = "<table>";
+    const char *end_tag = "</table>";
+
+    char *start = strstr(html_code, start_tag);
+    char *buf = NULL;
+
+    if(start) {
+        start += strlen(start_tag);
+        const char *end = strstr(start, end_tag);
+
+        if (end) {
+            buf = malloc((end - start + 1) * sizeof(char));
+            if (buf == NULL) {
+                fprintf(stderr, "[ERROR] Not enough memory to store buffer.\n");
+            }
+
+            size_t i = 0, j;
+            bool reading_url = false;
+            for (const char *ptr = start; ptr < end; ++ptr) {
+                switch(*ptr) {
+                case '"':
+                    if(reading_url) {
+                        if(buf[i - 1] == '/') {
+                            buf[i++] = '\n';
+                        } else {
+                            i = j;
+                        }
+                    } else {
+                        j = i;
+                    }
+                    reading_url = !reading_url;
+                    break;
+                default:
+                    if(reading_url)
+                        buf[i++] = *ptr;
+                    break;
+                }
+            }
+
+            buf[i] = '\0';
+
+            FILE *file = fopen(path, "w");
+            if(file == NULL) {
+                fprintf(stderr, "[ERROR] Failed to write output to file\n");
+                free(buf);
+                return 1;
+            }
+
+            fprintf(file, "%s", buf);
+            fclose(file);
+
+            printf("[INFO] Table links saved to file %s\n", path);
+
+            free(buf);
+        } else {
+            fprintf(stderr, "[ERROR] No table end tag found.\n");
+            return 1;
+        }
+    } else {
+        fprintf(stderr, "[ERROR] No table start tag found.\n");
         return 1;
     }
     return 0;
@@ -99,7 +165,7 @@ size_t gfg_write_callback(void *contents, size_t size, size_t nmemb, void *userp
 
     char *ptr = realloc(mem->data, mem->size + total_size + 1);
     if (ptr == NULL) {
-        fprintf(stderr, "Not enough memory to store HTML content\n");
+        fprintf(stderr, "[ERROR] Not enough memory to store HTML content\n");
         return 0;
     }
 
@@ -111,7 +177,7 @@ size_t gfg_write_callback(void *contents, size_t size, size_t nmemb, void *userp
     return total_size;
 }
 
-int gfg_scrape(char *url, char *path) {
+int gfg_table_links(char *url, char *path) {
     CURL *curl;
     CURLcode res;
     Memory chunk = {0};
@@ -124,7 +190,35 @@ int gfg_scrape(char *url, char *path) {
         res = curl_easy_perform(curl);
 
         if (res != CURLE_OK) {
-            fprintf(stderr, "cURL error: %s\n", curl_easy_strerror(res));
+            fprintf(stderr, "[ERROR] cURL error: %s\n", curl_easy_strerror(res));
+        } else {
+            return gfg_extract_table_links(chunk.data, path);
+        }
+
+        curl_easy_cleanup(curl);
+        free(chunk.data);
+    } else {
+        fprintf(stderr, "[ERROR] Failed to initialize libcurl\n");
+    }
+    return 0;
+}
+
+int gfg_scrape(char *url, char *path) {
+    CURL *curl;
+    CURLcode res;
+    Memory chunk = {0};
+
+    printf("[INFO] Web scraping code from \"%s\"\n", url);
+
+    curl = curl_easy_init();
+    if (curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, gfg_write_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+        res = curl_easy_perform(curl);
+
+        if (res != CURLE_OK) {
+            fprintf(stderr, "[ERROR] cURL error: %s\n", curl_easy_strerror(res));
         } else {
             return gfg_extract_javascript(chunk.data, path);
         }
@@ -132,7 +226,7 @@ int gfg_scrape(char *url, char *path) {
         curl_easy_cleanup(curl);
         free(chunk.data);
     } else {
-        fprintf(stderr, "Failed to initialize libcurl\n");
+        fprintf(stderr, "[ERROR] Failed to initialize libcurl\n");
         return 1;
     }
 	return 0;
