@@ -11,6 +11,7 @@ all: $(BUILD_DIR)/libcopypasta.so
 $(BUILD_DIR)/libcopypasta.so:
 	mkdir -p $(BUILD_DIR)
 	$(CC) src/copypasta.c -o $(BUILD_DIR)/libcopypasta.so $(CFLAGS) $(LDFLAGS)
+	$(CC) src/trashman.c -o $(BUILD_DIR)/libtrashman.so $(CFLAGS) $(LDFLAGS)
 
 clean:
 	rm -rf $(BUILD_DIR)

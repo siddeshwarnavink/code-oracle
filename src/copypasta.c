@@ -10,6 +10,11 @@ typedef struct Memory {
 } Memory;
 
 int gfg_extract_javascript(char *html_code, char *path) {
+    if (html_code == NULL) {
+        fprintf(stderr, "[ERROR] No HTML code provided.\n");
+        return 1;
+    }
+    
     const char *start_tag = "<code class=\"language-javascript\">";
     const char *end_tag = "</code>";
 
@@ -49,6 +54,10 @@ int gfg_extract_javascript(char *html_code, char *path) {
                             buf[i++] = '>';
                         } else if(strcmp(expr_buf, "quot") == 0) {
                             buf[i++] = '"';
+                        } else if(strcmp(expr_buf, "amp") == 0) {
+                            buf[i++] = '&';
+                        } else if(strcmp(expr_buf, "#39") == 0) {
+                            buf[i++] = '`';
                         } else {
                             fprintf(stderr, "[ERROR] Unknown HTML expression: %s\n", expr_buf);
                             free(buf);

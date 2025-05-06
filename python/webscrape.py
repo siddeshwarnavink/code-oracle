@@ -1,14 +1,11 @@
 import os
+import time
 import pathlib
 import shutil
 import ctypes
 import uuid
 
-# Configuration
-dataset_dir =  os.path.join(os.getcwd(), ".dataset")
-
-links_url = "https://www.geeksforgeeks.org/reactjs-projects/"
-links_file_path = os.path.join(dataset_dir, "links.txt")
+from shared import cstr, dataset_dir, links_url, links_file_path
 
 # Load library
 copypasta = ctypes.CDLL("./.build/libcopypasta.so")
@@ -19,10 +16,8 @@ copypasta.gfg_table_links.restype = ctypes.c_int
 copypasta.gfg_scrape.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
 copypasta.gfg_scrape.restype = ctypes.c_int
 
-def cstr(s):
-    return ctypes.c_char_p(s.encode("utf-8"))
-
 # Initialization
+start = time.time()
 print("[INFO] Dataset path is", dataset_dir)
 
 if os.path.isdir(dataset_dir):
@@ -38,6 +33,7 @@ if result == 1:
     quit()
 
 # Web scrape code from each page
+count = 0
 with open(links_file_path, "r") as file:
     for link in file:
         clean_link = link.strip()
@@ -45,3 +41,9 @@ with open(links_file_path, "r") as file:
         result = copypasta.gfg_scrape(cstr(clean_link), cstr(out_file))
         if result == 1:
             print("[INFO] Webpage skipped")
+        else:
+            count += 1
+
+end = time.time()
+elapsed_time =  end - start
+print(f"Web scraped {count} pages in {elapsed_time:.2f} seconds")
