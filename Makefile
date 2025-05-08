@@ -1,5 +1,5 @@
 CC = cc
-CFLAGS = -I$(LIB_DIR) -Wall -ggdb $(shell curl-config --cflags) -fPIC
+CFLAGS = -I$(LIB_DIR) -Wall -ggdb $(shell curl-config --cflags) -fPIC -Wno-unused-function
 LDFLAGS = $(shell curl-config --libs) -shared
 
 BUILD_DIR = .build

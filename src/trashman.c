@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 #define STB_C_LEXER_IMPLEMENTATION
 #define STB_DS_IMPLEMENTATION
@@ -12,36 +13,12 @@ typedef struct Item {
 	struct Item *left;
 	struct Item *right;
 	stb_lexer value;
-	size_t free_visited;
 } Item;
 
-const char *keywords[] = {
-    "React", "Component", "useState", "useEffect", "useContext", "useReducer", "useRef",
-    "useMemo", "useCallback", "useLayoutEffect", "useImperativeHandle",
-    "return", "render", "props", "children", "className", "onClick", "onSubmit", "onChange",
-    "onInput", "onKeyDown", "onKeyUp", "onMouseEnter", "onMouseLeave", "onFocus",
-    "onBlur", "onScroll", "style", "key", "ref",
-    "const", "let", "var", "function", "class", "extends", "constructor", "if", "else",
-    "switch", "case", "default", "break", "continue", "try", "catch", "finally",
-    "throw", "return", "typeof", "instanceof", "new", "this", "super",
-    "import", "from", "export", "default", "async", "await",
-    "componentDidMount", "componentDidUpdate", "componentWillUnmount",
-    "shouldComponentUpdate", "getDerivedStateFromProps", "getSnapshotBeforeUpdate",
-    "setState", "state", "context", "useContext", "Provider", "Consumer",
-    "div", "span", "input", "button", "form", "label", "ul", "li", "table", "thead",
-    "tbody", "tr", "td", "th", "p", "h1", "h2", "h3", "h4", "h5", "h6", "a", "img",
-    "href", "src", "alt", "title", "type", "value", "id", "name", "placeholder"
-};
-#define NUM_KEYWORDS (sizeof(keywords) / sizeof(keywords[0]))
-
-size_t is_keyword(const char *str) {
-    for (size_t i = 0; i < NUM_KEYWORDS; i++) {
-        if (strcmp(str, keywords[i]) == 0) {
-            return 1;
-        }
-    }
-    return 0;
-}
+typedef struct Pair {
+	Item *a;
+	Item *b;
+} Pair;
 
 size_t tokens_equal(stb_lexer a, stb_lexer b) {
 	if(a.token == b.token) {
@@ -62,29 +39,15 @@ size_t tokens_equal(stb_lexer a, stb_lexer b) {
 }
 
 size_t items_equal(Item *a, Item *b) {
-	// Case: a a
-	if(a->left == NULL && b->left == NULL
-	   && a->right == NULL && b->right == NULL) {
+	if (a == NULL || b == NULL) {
+		assert(1);
+	}
+
+	if(a->left && b->left && a->right && b->right)
+		return a->id == b->id;
+
+	if(!a->left && !b->left && !a->right && !b->right)
 		return tokens_equal(a->value, b->value);
-	}
-
-	// Case: X X
-	if(a->left != NULL && b->left != NULL
-	   && a->right != NULL && b->right != NULL) {
-		size_t r1 = items_equal(a->left, b->left);
-		size_t r2 = items_equal(a->right, b->right);
-		return r1 && r2;
-	}
-
-	// Case: X a
-	if(a->left != NULL && b->left == NULL) {
-		return items_equal(a->left, b);
-	}
-
-	// Case: a X
-	if(a->left == NULL && b->left != NULL) {
-		return items_equal(a, b->left);
-	}
 
 	return 0;
 }
@@ -95,7 +58,7 @@ void copy_into_item(Item *a, stb_lexer *b) {
 	case CLEX_id:
 	case CLEX_dqstring:
 	case CLEX_sqstring:
-		a->value.string =  malloc(strlen(b->string));
+		a->value.string =  malloc(strlen(b->string) + 1);
 		strcpy(a->value.string, b->string);
 		break;
 	case CLEX_intlit:
@@ -109,8 +72,6 @@ void copy_into_item(Item *a, stb_lexer *b) {
 
 void free_item(Item *itm) {
 	if(itm != NULL) {
-		if(itm->free_visited) return;
-		itm->free_visited = 1;
 		free_item(itm->left);
 		free_item(itm->right);
 		if(itm->value.string != NULL)
@@ -119,14 +80,49 @@ void free_item(Item *itm) {
 	}
 }
 
-void render_dot(Item *itm) {
-	printf("    %zu;\n", itm->id);
-	if (itm->left != NULL) {
-		printf("    %zu -> %zu;\n", itm->id, itm->left->id);
+void print_item(Item *itm) {
+	if(itm->left != NULL && itm->right != NULL) {
+		printf("(");
+		print_item(itm->left);
+		printf(" ");
+		print_item(itm->right);
+		printf(")");
+	} else {
+		switch(itm->value.token) {
+		case CLEX_id:
+		case CLEX_dqstring:
+		case CLEX_sqstring:
+			printf("%s", itm->value.string);
+			break;
+		case CLEX_intlit:
+			printf("%ld", itm->value.int_number);
+			break;
+		case CLEX_floatlit:
+			printf("%lf", itm->value.real_number);
+			break;
+		default:
+			if(itm->value.token < 256)
+				printf("%c", (char)itm->value.token);
+			else
+				printf("%ld", itm->value.token);
+			break;
+		}
 	}
-	if (itm->right != NULL) {
-		printf("    %zu -> %zu;\n", itm->id, itm->right->id);
+}
+
+size_t pair_already_merged(Pair *pairs, Item *a, Item *b) {
+	if(pairs == NULL || a == NULL || b == NULL)
+		assert(1);
+
+	if(arrlenu(pairs) == 0)
+		assert(1);
+
+	for(size_t i = 0; i < arrlenu(pairs); ++i) {
+		if((items_equal(pairs[i].a, a) && items_equal(pairs[i].b, b))
+		   || (items_equal(pairs[i].a, b) && items_equal(pairs[i].b, a)))
+			return 1;
 	}
+	return 0;
 }
 
 int parse_code(char *path) {
@@ -137,24 +133,24 @@ int parse_code(char *path) {
 	}
 
 	fseek(file, 0, SEEK_END);
-    long file_size = ftell(file);
-    fseek(file, 0, SEEK_SET);
+	long file_size = ftell(file);
+	fseek(file, 0, SEEK_SET);
 
 	char *input_stream = (char *)malloc(file_size + 1);
-    if (input_stream == NULL) {
+	if (input_stream == NULL) {
 		fprintf(stderr, "[ERROR] Failed to allocate memory for input stream.");
-        fclose(file);
-        return 1;
-    }
+		fclose(file);
+		return 1;
+	}
 
 	size_t read_size = fread(input_stream, 1, file_size, file);
-    if (read_size != file_size) {
+	if (read_size != file_size) {
 		fprintf(stderr, "[ERROR] Failed to read the file.");
-        free(input_stream);
-        fclose(file);
-        return 1;
-    }
-    fclose(file);
+		free(input_stream);
+		fclose(file);
+		return 1;
+	}
+	fclose(file);
 	input_stream[file_size] = '\0';
 
 	char *input_stream_end = input_stream + file_size;
@@ -164,19 +160,18 @@ int parse_code(char *path) {
 	stb_c_lexer_init(&lexer, input_stream, input_stream_end, string_store, sizeof(string_store));
 
 	Item **items = NULL;
+	size_t item_counter = 0;
 
-	size_t token_id = 0;
 	int token = stb_c_lexer_get_token(&lexer);
 	while(token != 0) {
 		if(lexer.token == CLEX_parse_error) {
 			fprintf(stderr, "[ERROR] Parse error.\n");
 		} else {
 			Item *itm = malloc(sizeof(Item));
-			itm->id = token_id++;
+			itm->id = item_counter++;
 			itm->left = NULL;
 			itm->right = NULL;
 			itm->value.string = NULL;
-			itm->free_visited = 0;
 			copy_into_item(itm, &lexer);
 			arrput(items, itm);
 		}
@@ -185,84 +180,65 @@ int parse_code(char *path) {
 
 	if(arrlenu(items) < 2) {
 		fprintf(stderr, "[ERROR] Not enough tokens.\n");
+		for(size_t i = 0; i < arrlenu(items); ++i)
+			free_item(items[i]);
+		arrfree(items);
+		free(input_stream);
 		return 1;
 	}
 
-	size_t p1 = 0, p2 = 1; // pair
+	Pair *merged_pairs = NULL;
+	size_t *match_indexes = NULL;
 
-	while(p2 < arrlenu(items)) {
-		size_t i = p1 + 2, j = p2 + 2;
-		Item *root = NULL;
-
-		while(j < arrlenu(items)) {
-			if(root == NULL && items_equal(items[i], items[p1]) && items_equal(items[j], items[p2])) {
-				// From:
-				//   X a b c X a d b a a c d
-				//   ^ ^     ^ ^
-				//   p1p2    i j
-				//
-				// To:
-				//   Y b c Y d b a a c d
-				//   ^       ^ ^
-				//   p1      i j
-				//   p2
-
-				root = malloc(sizeof(Item));
-				root->id = token_id++;
-				root->left = items[p1];
-				root->right = items[p2];
-				root->value.string = NULL;
-				root->free_visited = 0;
-
-				items[p1] = root;
-				arrdel(items, p2);
-				p2 = p1;
-
-				if(items[i]->left == NULL)
-					free_item(items[i]);
-				items[i] = root;
-				if(items[j]->left == NULL)
-					free_item(items[j]);
-				arrdel(items, j);
-			} else if (root != NULL && items_equal(root->left, items[i]) && items_equal(root->right, items[j])) {
-				// From:
-				//   X a b c a a d b a a c d
-				//   ^       ^ ^
-				//   p1      i j
-				//   p2
-				//
-				// To:
-				//   X a b c X d b a a c d
-				//   ^         ^ ^
-				//   p1        i j
-				//   p2
-
-				if(items[i]->left == NULL)
-					free_item(items[i]);
-				items[i] = root;
-				if(items[j]->left == NULL)
-					free_item(items[j]);
-				arrdel(items, j);
-
-				++i;
-				++j;
-			} else {
-				i += 2;
-				j += 2;
+	while(1) {
+		size_t m_freq = 2, freq = 0, p1 = 0, p2 = 1, match_count = 0;
+		while(p2 < arrlenu(items)) {
+			arrsetlen(match_indexes, 0);
+			for (size_t k = 0; k + 1 < arrlenu(items); ++k) {
+				if (items_equal(items[k], items[p1]) && items_equal(items[k+1], items[p2])) {
+					arrput(match_indexes, k);
+					++freq;
+				}
 			}
-		}
-		if(root == NULL) {
-			++p1;
-		}
-		++p2;
-	}
+			if(freq > m_freq && !pair_already_merged(merged_pairs, items[p1], items[p2])) {
+				size_t item_id = item_counter++;
+				print_item(items[p1]);
+				printf(" and ");
+				print_item(items[p2]);
+				printf("\n");
 
-	printf("digraph G {\n");
+				Pair p = { items[p1], items[p2] };
+				arrput(merged_pairs, p);
+
+				for(size_t i = 0; i < arrlenu(match_indexes); ++i) {
+					size_t k = match_indexes[i];
+					if(i > 0) --k;
+
+					Item *itm = malloc(sizeof(Item));
+					itm->id = item_id;
+					itm->left = items[k];
+					itm->right = items[k+1];
+					itm->value.string = NULL;
+
+					items[k] = itm;
+					arrdel(items, k + 1);
+				}
+
+				match_count++;
+				m_freq = freq;
+			}
+			++p1;
+			++p2;
+			freq = 0;
+		}
+		if(match_count < 1) break;
+	}
+	arrfree(match_indexes);
+	arrfree(merged_pairs);
+
 	for(size_t i = 0; i < arrlenu(items); ++i) {
-		render_dot(items[i]);
 		free_item(items[i]);
 	}
-	printf("}\n");
 	arrfree(items);
 	free(input_stream);
 
