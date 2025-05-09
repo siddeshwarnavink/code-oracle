@@ -1,6 +1,6 @@
 CC = cc
 CFLAGS = -I$(LIB_DIR) -Wall -ggdb $(shell curl-config --cflags) -fPIC -Wno-unused-function
-LDFLAGS = $(shell curl-config --libs) -shared
+LDFLAGS = $(shell curl-config --libs) -shared -L./lib/ -l:libtree-sitter.a -l:libtree-sitter-javascript.a
 
 BUILD_DIR = .build
 SRC_DIR = src

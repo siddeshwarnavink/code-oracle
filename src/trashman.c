@@ -7,6 +7,8 @@
 #define STB_DS_IMPLEMENTATION
 #include "stb_c_lexer.h"
 #include "stb_ds.h"
+#include "tree_sitter/api.h"
+#include "tree-sitter-javascript.h"
 
 typedef struct Item {
 	size_t id;
@@ -19,6 +21,25 @@ typedef struct Pair {
 	Item *a;
 	Item *b;
 } Pair;
+
+typedef struct StringChanges {
+	size_t start;
+	size_t end;
+	char text[32];
+} StringChanges;
+
+size_t var_count = 0;
+
+typedef struct Variable {
+    char *original_name;
+    char *new_name;
+    struct Variable *next;
+} Variable;
+
+typedef struct Scope {
+    Variable *variables;
+    struct Scope *parent;
+} Scope;
 
 size_t tokens_equal(stb_lexer a, stb_lexer b) {
 	if(a.token == b.token) {
@@ -125,6 +146,191 @@ size_t pair_already_merged(Pair *pairs, Item *a, Item *b) {
 	return 0;
 }
 
+// Function to create a new scope
+Scope* create_scope(Scope *parent) {
+    Scope *scope = (Scope*)malloc(sizeof(Scope));
+    scope->variables = NULL;
+    scope->parent = parent;
+    return scope;
+}
+
+// Function to add a variable to the current scope
+void add_variable(Scope *scope, const char *original_name, const char *new_name) {
+    Variable *var = (Variable*)malloc(sizeof(Variable));
+    var->original_name = strdup(original_name);
+    var->new_name = strdup(new_name);
+    var->next = scope->variables;
+    scope->variables = var;
+}
+
+// Function to look up a variable in the scope chain
+const char* find_variable(Scope *scope, const char *name) {
+    while (scope != NULL) {
+        Variable *current = scope->variables;
+        while (current != NULL) {
+            if (strcmp(current->original_name, name) == 0) {
+                return current->new_name;
+            }
+            current = current->next;
+        }
+        scope = scope->parent;
+    }
+    return NULL;
+}
+
+// Helper function to check if a node type is a scope boundary
+int is_scope_boundary(const char *type) {
+    return strcmp(type, "statement_block") == 0 ||
+		strcmp(type, "function_declaration") == 0 ||
+		strcmp(type, "method_definition") == 0 ||
+		strcmp(type, "class_body") == 0 ||
+		strcmp(type, "for_statement") == 0 ||
+		strcmp(type, "while_statement") == 0 ||
+		strcmp(type, "if_statement") == 0;
+}
+
+void rename_variables(TSNode node, const char *source_code, StringChanges ***changes, Scope *current_scope) {
+    const char *node_type = ts_node_type(node);
+    
+    // Enter new scope if current node is a scope boundary
+    Scope *new_scope = NULL;
+    if (is_scope_boundary(node_type)) {
+        new_scope = create_scope(current_scope);
+        current_scope = new_scope;
+    }
+
+    // Process variable declarations
+    if (strcmp(node_type, "lexical_declaration") == 0 ||
+        strcmp(node_type, "variable_declaration") == 0) {
+        
+        TSNode declarator = ts_node_named_child(node, 0);
+        if (strcmp(ts_node_type(declarator), "variable_declarator") == 0) {
+            TSNode identifier = ts_node_named_child(declarator, 0);
+            if (strcmp(ts_node_type(identifier), "identifier") == 0) {
+                // Get original variable name
+                size_t start = ts_node_start_byte(identifier);
+                size_t end = ts_node_end_byte(identifier);
+                char *original_name = strndup(source_code + start, end - start);
+                
+                // Generate new name
+                char new_name[32];
+                snprintf(new_name, sizeof(new_name), "v%zu", var_count++);
+                
+                // Add to current scope
+                add_variable(current_scope, original_name, new_name);
+                
+                // Record declaration change
+                StringChanges *c = malloc(sizeof(StringChanges));
+                c->start = start;
+                c->end = end;
+                strncpy(c->text, new_name, sizeof(c->text));
+                arrput(*changes, c);
+                
+                free(original_name);
+            }
+        }
+    }
+    // Process identifier usages
+    else if (strcmp(node_type, "identifier") == 0) {
+        // Check if this is part of a declaration (already handled)
+        TSNode parent = ts_node_parent(node);
+        if (strcmp(ts_node_type(parent), "variable_declarator") == 0 &&
+            ts_node_named_child(parent, 0).id == node.id) {
+            // Skip declaration identifiers
+        } else {
+            // Look up variable in scope chain
+            size_t start = ts_node_start_byte(node);
+            size_t end = ts_node_end_byte(node);
+            char *name = strndup(source_code + start, end - start);
+            
+            const char *new_name = find_variable(current_scope, name);
+            if (new_name != NULL) {
+                StringChanges *c = malloc(sizeof(StringChanges));
+                c->start = start;
+                c->end = end;
+                strncpy(c->text, new_name, sizeof(c->text));
+                arrput(*changes, c);
+            }
+            free(name);
+        }
+    }
+
+    // Recursively process children
+    uint32_t child_count = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_named_child(node, i);
+        rename_variables(child, source_code, changes, current_scope);
+    }
+
+    // Clean up scope if we created a new one
+    if (new_scope != NULL) {
+        // Free variables in the scope
+        Variable *var = new_scope->variables;
+        while (var != NULL) {
+            Variable *next = var->next;
+            free(var->original_name);
+            free(var->new_name);
+            free(var);
+            var = next;
+        }
+        free(new_scope);
+    }
+}
+
+// Initialization function
+void rename_children_variables(TSNode root, const char *source_code, StringChanges ***changes) {
+    Scope *global_scope = create_scope(NULL);
+    rename_variables(root, source_code, changes, global_scope);
+    
+    // Clean up global scope
+    Variable *var = global_scope->variables;
+    while (var != NULL) {
+        Variable *next = var->next;
+        free(var->original_name);
+        free(var->new_name);
+        free(var);
+        var = next;
+    }
+    free(global_scope);
+}
+
+/*
+void rename_children_variables(TSNode root, StringChanges ***changes) {
+    uint32_t count = ts_node_named_child_count(root);
+    for (uint32_t i = 0; i < count; i++) {
+        TSNode child = ts_node_named_child(root, i);
+
+		if (strcmp(ts_node_type(child), "class_declaration") == 0
+			|| strcmp(ts_node_type(child), "class_body") == 0
+			|| strcmp(ts_node_type(child), "method_definition") == 0
+			|| strcmp(ts_node_type(child), "statement_block") == 0
+			|| strcmp(ts_node_type(child), "if_statement") == 0
+			) {
+			rename_children_variables(child, changes);
+		}
+        else if (strcmp(ts_node_type(child), "lexical_declaration") == 0) {
+            TSNode var_node = ts_node_named_child(child, 0);
+			assert(strcmp(ts_node_type(var_node), "variable_declarator") == 0);
+
+			TSNode ident_node = ts_node_named_child(var_node, 0);
+			assert(strcmp(ts_node_type(ident_node), "identifier") == 0);
+
+			size_t start = ts_node_start_byte(ident_node);
+			size_t end = ts_node_end_byte(ident_node);
+
+			StringChanges *c = malloc(sizeof(StringChanges));
+			c->start = start;
+			c->end = end;
+			snprintf(c->text, sizeof(c->text), "v%zu", var_count++);
+			arrput(*changes, c);
+        }
+		// else {
+		// 	printf("%s\n", ts_node_type(child));
+		// }
+    }
+}
+*/
+
 int parse_code(char *path) {
 	FILE *file = fopen(path, "r");
 	if(file == NULL) {
@@ -153,6 +359,70 @@ int parse_code(char *path) {
 	fclose(file);
 	input_stream[file_size] = '\0';
 
+	//
+	// Rename variables using tree-sitter
+	//
+    TSParser *parser = ts_parser_new();
+	ts_parser_set_language(parser, tree_sitter_javascript());
+
+	TSTree *tree = ts_parser_parse_string(parser, NULL, input_stream, strlen(input_stream));
+    TSNode root = ts_tree_root_node(tree);
+
+	StringChanges **changes = NULL;
+	rename_children_variables(root, input_stream, &changes);
+
+    ts_tree_delete(tree);
+    ts_parser_delete(parser);
+
+	//
+	// Update the variable name in code.
+	//
+	char *code_output = (char *)malloc(file_size + 1);
+	if (code_output == NULL) {
+		fprintf(stderr, "[ERROR] Failed to allocate memory for code output.");
+
+		for(size_t i = 0; i < arrlenu(changes); ++i)
+			free(changes[i]);
+		arrfree(changes);
+		free(input_stream);
+		
+		return 1;
+	}
+	
+	size_t out_index = 0, src_index = 0;
+	for(size_t i = 0; i < arrlenu(changes); ++i) {
+		/*
+		printf("%.*s => %s\n",
+			   (int)(changes[i]->end - changes[i]->start),
+			   input_stream + changes[i]->start,
+			   changes[i]->text);
+		*/
+		
+		while (src_index < changes[i]->start)
+			code_output[out_index++] = input_stream[src_index++];
+
+		const char *r = changes[i]->text;
+		while (*r)
+			code_output[out_index++] = *r++;
+
+		src_index = changes[i]->end;
+		free(changes[i]);
+	}
+
+	while (input_stream[src_index])
+        code_output[out_index++] = input_stream[src_index++];
+    code_output[out_index] = '\0';
+
+	printf("%s", code_output);
+
+	arrfree(changes);
+	free(input_stream);
+	free(code_output);
+	return 0;
+
+	//
+	// BPE logic
+	//
 	char *input_stream_end = input_stream + file_size;
 
 	stb_lexer lexer;
@@ -194,12 +464,17 @@ int parse_code(char *path) {
 		size_t m_freq = 2, freq = 0, p1 = 0, p2 = 1, match_count = 0;
 		while(p2 < arrlenu(items)) {
 			arrsetlen(match_indexes, 0);
+
+			//
+			// Sliding window
+			//
 			for (size_t k = 0; k + 1 < arrlenu(items); ++k) {
 				if (items_equal(items[k], items[p1]) && items_equal(items[k+1], items[p2])) {
 					arrput(match_indexes, k);
 					++freq;
 				}
 			}
+
 			if(freq > m_freq && !pair_already_merged(merged_pairs, items[p1], items[p2])) {
 				size_t item_id = item_counter++;
 				print_item(items[p1]);
