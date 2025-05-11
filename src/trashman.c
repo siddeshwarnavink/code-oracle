@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <stdint.h>
 
 #define STB_C_LEXER_IMPLEMENTATION
 #define STB_DS_IMPLEMENTATION
@@ -11,7 +12,7 @@
 #include "tree-sitter-javascript.h"
 
 typedef struct Item {
-	size_t id;
+	size_t id; // Only for nested items.
 	struct Item *left;
 	struct Item *right;
 	stb_lexer value;
@@ -20,6 +21,7 @@ typedef struct Item {
 typedef struct Pair {
 	Item *a;
 	Item *b;
+	size_t item_id;
 } Pair;
 
 typedef struct StringChanges {
@@ -27,8 +29,6 @@ typedef struct StringChanges {
 	size_t end;
 	char text[32];
 } StringChanges;
-
-size_t var_count = 0;
 
 typedef struct Variable {
     char *original_name;
@@ -40,6 +40,11 @@ typedef struct Scope {
     Variable *variables;
     struct Scope *parent;
 } Scope;
+
+
+size_t var_count = 0, item_counter = 0;
+Pair **global_pairs = NULL;
+Item **global_items = NULL;
 
 size_t tokens_equal(stb_lexer a, stb_lexer b) {
 	if(a.token == b.token) {
@@ -91,14 +96,14 @@ void copy_into_item(Item *a, stb_lexer *b) {
 	}
 }
 
+//
+// NOTE: Left and right should be freed manually.
+//
 void free_item(Item *itm) {
-	if(itm != NULL) {
-		free_item(itm->left);
-		free_item(itm->right);
-		if(itm->value.string != NULL)
-			free(itm->value.string);
-		free(itm);
-	}
+	assert(itm != NULL);
+	if(itm->value.string != NULL)
+		free(itm->value.string);
+	free(itm);
 }
 
 void print_item(Item *itm) {
@@ -131,7 +136,7 @@ void print_item(Item *itm) {
 	}
 }
 
-size_t pair_already_merged(Pair *pairs, Item *a, Item *b) {
+int pair_already_merged(Pair *pairs, Item *a, Item *b) {
 	if(pairs == NULL || a == NULL || b == NULL)
 		assert(1);
 
@@ -141,12 +146,11 @@ size_t pair_already_merged(Pair *pairs, Item *a, Item *b) {
 	for(size_t i = 0; i < arrlenu(pairs); ++i) {
 		if((items_equal(pairs[i].a, a) && items_equal(pairs[i].b, b))
 		   || (items_equal(pairs[i].a, b) && items_equal(pairs[i].b, a)))
-			return 1;
+			return (int)i;
 	}
-	return 0;
+	return -1;
 }
 
-// Function to create a new scope
 Scope* create_scope(Scope *parent) {
     Scope *scope = (Scope*)malloc(sizeof(Scope));
     scope->variables = NULL;
@@ -154,7 +158,6 @@ Scope* create_scope(Scope *parent) {
     return scope;
 }
 
-// Function to add a variable to the current scope
 void add_variable(Scope *scope, const char *original_name, const char *new_name) {
     Variable *var = (Variable*)malloc(sizeof(Variable));
     var->original_name = strdup(original_name);
@@ -163,7 +166,6 @@ void add_variable(Scope *scope, const char *original_name, const char *new_name)
     scope->variables = var;
 }
 
-// Function to look up a variable in the scope chain
 const char* find_variable(Scope *scope, const char *name) {
     while (scope != NULL) {
         Variable *current = scope->variables;
@@ -178,7 +180,6 @@ const char* find_variable(Scope *scope, const char *name) {
     return NULL;
 }
 
-// Helper function to check if a node type is a scope boundary
 int is_scope_boundary(const char *type) {
     return strcmp(type, "statement_block") == 0 ||
 		strcmp(type, "function_declaration") == 0 ||
@@ -191,58 +192,48 @@ int is_scope_boundary(const char *type) {
 
 void rename_variables(TSNode node, const char *source_code, StringChanges ***changes, Scope *current_scope) {
     const char *node_type = ts_node_type(node);
-    
-    // Enter new scope if current node is a scope boundary
+
     Scope *new_scope = NULL;
     if (is_scope_boundary(node_type)) {
         new_scope = create_scope(current_scope);
         current_scope = new_scope;
     }
 
-    // Process variable declarations
     if (strcmp(node_type, "lexical_declaration") == 0 ||
         strcmp(node_type, "variable_declaration") == 0) {
-        
+
         TSNode declarator = ts_node_named_child(node, 0);
         if (strcmp(ts_node_type(declarator), "variable_declarator") == 0) {
             TSNode identifier = ts_node_named_child(declarator, 0);
             if (strcmp(ts_node_type(identifier), "identifier") == 0) {
-                // Get original variable name
                 size_t start = ts_node_start_byte(identifier);
                 size_t end = ts_node_end_byte(identifier);
                 char *original_name = strndup(source_code + start, end - start);
-                
-                // Generate new name
+
                 char new_name[32];
                 snprintf(new_name, sizeof(new_name), "v%zu", var_count++);
-                
-                // Add to current scope
+
                 add_variable(current_scope, original_name, new_name);
-                
-                // Record declaration change
+
                 StringChanges *c = malloc(sizeof(StringChanges));
                 c->start = start;
                 c->end = end;
                 strncpy(c->text, new_name, sizeof(c->text));
                 arrput(*changes, c);
-                
+
                 free(original_name);
             }
         }
-    }
-    // Process identifier usages
-    else if (strcmp(node_type, "identifier") == 0) {
-        // Check if this is part of a declaration (already handled)
+    } else if (strcmp(node_type, "identifier") == 0) {
         TSNode parent = ts_node_parent(node);
         if (strcmp(ts_node_type(parent), "variable_declarator") == 0 &&
             ts_node_named_child(parent, 0).id == node.id) {
-            // Skip declaration identifiers
+			// ...
         } else {
-            // Look up variable in scope chain
             size_t start = ts_node_start_byte(node);
             size_t end = ts_node_end_byte(node);
             char *name = strndup(source_code + start, end - start);
-            
+
             const char *new_name = find_variable(current_scope, name);
             if (new_name != NULL) {
                 StringChanges *c = malloc(sizeof(StringChanges));
@@ -255,16 +246,13 @@ void rename_variables(TSNode node, const char *source_code, StringChanges ***cha
         }
     }
 
-    // Recursively process children
     uint32_t child_count = ts_node_named_child_count(node);
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_named_child(node, i);
         rename_variables(child, source_code, changes, current_scope);
     }
 
-    // Clean up scope if we created a new one
     if (new_scope != NULL) {
-        // Free variables in the scope
         Variable *var = new_scope->variables;
         while (var != NULL) {
             Variable *next = var->next;
@@ -277,12 +265,10 @@ void rename_variables(TSNode node, const char *source_code, StringChanges ***cha
     }
 }
 
-// Initialization function
 void rename_children_variables(TSNode root, const char *source_code, StringChanges ***changes) {
     Scope *global_scope = create_scope(NULL);
     rename_variables(root, source_code, changes, global_scope);
-    
-    // Clean up global scope
+
     Variable *var = global_scope->variables;
     while (var != NULL) {
         Variable *next = var->next;
@@ -294,44 +280,14 @@ void rename_children_variables(TSNode root, const char *source_code, StringChang
     free(global_scope);
 }
 
-/*
-void rename_children_variables(TSNode root, StringChanges ***changes) {
-    uint32_t count = ts_node_named_child_count(root);
-    for (uint32_t i = 0; i < count; i++) {
-        TSNode child = ts_node_named_child(root, i);
-
-		if (strcmp(ts_node_type(child), "class_declaration") == 0
-			|| strcmp(ts_node_type(child), "class_body") == 0
-			|| strcmp(ts_node_type(child), "method_definition") == 0
-			|| strcmp(ts_node_type(child), "statement_block") == 0
-			|| strcmp(ts_node_type(child), "if_statement") == 0
-			) {
-			rename_children_variables(child, changes);
-		}
-        else if (strcmp(ts_node_type(child), "lexical_declaration") == 0) {
-            TSNode var_node = ts_node_named_child(child, 0);
-			assert(strcmp(ts_node_type(var_node), "variable_declarator") == 0);
-
-			TSNode ident_node = ts_node_named_child(var_node, 0);
-			assert(strcmp(ts_node_type(ident_node), "identifier") == 0);
-
-			size_t start = ts_node_start_byte(ident_node);
-			size_t end = ts_node_end_byte(ident_node);
-
-			StringChanges *c = malloc(sizeof(StringChanges));
-			c->start = start;
-			c->end = end;
-			snprintf(c->text, sizeof(c->text), "v%zu", var_count++);
-			arrput(*changes, c);
-        }
-		// else {
-		// 	printf("%s\n", ts_node_type(child));
-		// }
-    }
+int compare_size_t_desc(const void *a, const void *b) {
+    return (*(size_t *)b - *(size_t *)a);
 }
-*/
 
 int parse_code(char *path) {
+	var_count = 0;
+	printf("[INFO] Processing %s file.\n", path);
+
 	FILE *file = fopen(path, "r");
 	if(file == NULL) {
 		fprintf(stderr, "[ERROR] Failed to open the file.");
@@ -368,6 +324,8 @@ int parse_code(char *path) {
 	TSTree *tree = ts_parser_parse_string(parser, NULL, input_stream, strlen(input_stream));
     TSNode root = ts_tree_root_node(tree);
 
+	printf("[INFO] Code parsed using tree-sitter.\n");
+
 	StringChanges **changes = NULL;
 	rename_children_variables(root, input_stream, &changes);
 
@@ -385,10 +343,10 @@ int parse_code(char *path) {
 			free(changes[i]);
 		arrfree(changes);
 		free(input_stream);
-		
+
 		return 1;
 	}
-	
+
 	size_t out_index = 0, src_index = 0;
 	for(size_t i = 0; i < arrlenu(changes); ++i) {
 		/*
@@ -397,7 +355,7 @@ int parse_code(char *path) {
 			   input_stream + changes[i]->start,
 			   changes[i]->text);
 		*/
-		
+
 		while (src_index < changes[i]->start)
 			code_output[out_index++] = input_stream[src_index++];
 
@@ -413,24 +371,21 @@ int parse_code(char *path) {
         code_output[out_index++] = input_stream[src_index++];
     code_output[out_index] = '\0';
 
-	printf("%s", code_output);
+	// printf("%s", code_output);
+	printf("[INFO] Renamed %zu variables in the code.\n", arrlenu(changes));
 
 	arrfree(changes);
 	free(input_stream);
-	free(code_output);
-	return 0;
 
 	//
 	// BPE logic
 	//
-	char *input_stream_end = input_stream + file_size;
+	char *code_output_end = code_output + out_index;
+	Item **items = NULL;
 
 	stb_lexer lexer;
 	char string_store[1028];
-	stb_c_lexer_init(&lexer, input_stream, input_stream_end, string_store, sizeof(string_store));
-
-	Item **items = NULL;
-	size_t item_counter = 0;
+	stb_c_lexer_init(&lexer, code_output, code_output_end, string_store, sizeof(string_store));
 
 	int token = stb_c_lexer_get_token(&lexer);
 	while(token != 0) {
@@ -438,12 +393,12 @@ int parse_code(char *path) {
 			fprintf(stderr, "[ERROR] Parse error.\n");
 		} else {
 			Item *itm = malloc(sizeof(Item));
-			itm->id = item_counter++;
 			itm->left = NULL;
 			itm->right = NULL;
 			itm->value.string = NULL;
 			copy_into_item(itm, &lexer);
 			arrput(items, itm);
+			arrput(global_items, itm);
 		}
 		token = stb_c_lexer_get_token(&lexer);
 	}
@@ -453,7 +408,7 @@ int parse_code(char *path) {
 		for(size_t i = 0; i < arrlenu(items); ++i)
 			free_item(items[i]);
 		arrfree(items);
-		free(input_stream);
+		free(code_output);
 		return 1;
 	}
 
@@ -463,6 +418,9 @@ int parse_code(char *path) {
 	while(1) {
 		size_t m_freq = 2, freq = 0, p1 = 0, p2 = 1, match_count = 0;
 		while(p2 < arrlenu(items)) {
+			//
+			// NOTE: Each pair will be freed by parse_code_free()
+			//
 			arrsetlen(match_indexes, 0);
 
 			//
@@ -475,27 +433,43 @@ int parse_code(char *path) {
 				}
 			}
 
-			if(freq > m_freq && !pair_already_merged(merged_pairs, items[p1], items[p2])) {
-				size_t item_id = item_counter++;
-				print_item(items[p1]);
-				printf(" and ");
-				print_item(items[p2]);
-				printf("\n");
+			if(freq > m_freq && pair_already_merged(merged_pairs, items[p1], items[p2]) < 0) {
+				int global_ix = pair_already_merged(merged_pairs, items[p1], items[p2]);
+				size_t item_id;
 
-				Pair p = { items[p1], items[p2] };
-				arrput(merged_pairs, p);
+				if(global_ix > -1) {
+					item_id = global_pairs[global_ix]->item_id;
+				} else {
+					item_id = item_counter++;
+				}
+
+				Pair *p = malloc(sizeof(Pair));
+				p->a = items[p1];
+				p->b = items[p2];
+				p->item_id = item_id;
+
+				arrput(merged_pairs, *p);
+				arrput(global_pairs, p);
+
+				// Process match_indexes in reverse order to avoid index
+				// invalidation
+				qsort(match_indexes, arrlenu(match_indexes), sizeof(size_t), compare_size_t_desc);
 
 				for(size_t i = 0; i < arrlenu(match_indexes); ++i) {
 					size_t k = match_indexes[i];
-					if(i > 0) --k;
+					// if(i > 0) --k;
+
+					assert(k + 1 < arrlenu(items));
 
 					Item *itm = malloc(sizeof(Item));
 					itm->id = item_id;
 					itm->left = items[k];
 					itm->right = items[k+1];
 					itm->value.string = NULL;
+					arrput(global_items, itm);
 
 					items[k] = itm;
+
 					arrdel(items, k + 1);
 				}
 
@@ -511,11 +485,139 @@ int parse_code(char *path) {
 	arrfree(match_indexes);
 	arrfree(merged_pairs);
 
-	for(size_t i = 0; i < arrlenu(items); ++i) {
-		free_item(items[i]);
-	}
+	//
+	// NOTE: Each item will be freed by parse_code_free()
+	//
 	arrfree(items);
-	free(input_stream);
+	free(code_output);
+
+	printf("[INFO] File processing done.\n");
 
 	return 0;
+}
+
+void parse_code_print(size_t print_all) {
+	if(print_all > 0) {
+		for(size_t i = 0; i < arrlenu(global_pairs); ++i) {
+			print_item(global_pairs[i]->a);
+			printf(" and ");
+			print_item(global_pairs[i]->b);
+			printf("\n");
+		}
+	}
+	printf("\n Totally %zu pairs\n", arrlenu(global_pairs));
+}
+
+void parse_code_save(const char *path) {
+    FILE *file = fopen(path, "wb");
+    if (file == NULL) {
+        fprintf(stderr, "[ERROR] Failed to open file for saving: %s\n", path);
+        return;
+    }
+
+    size_t pair_count = arrlenu(global_pairs);
+    fwrite(&pair_count, sizeof(size_t), 1, file);
+
+    for (size_t i = 0; i < pair_count; ++i) {
+        Pair *pair = global_pairs[i];
+
+        fwrite(&pair->item_id, sizeof(size_t), 1, file);
+
+        for (int j = 0; j < 2; ++j) {
+            Item *item = (j == 0) ? pair->a : pair->b;
+            fwrite(&item->id, sizeof(size_t), 1, file);
+            fwrite(&item->value.token, sizeof(int), 1, file);
+
+            switch (item->value.token) {
+			case CLEX_id:
+			case CLEX_dqstring:
+			case CLEX_sqstring: {
+				size_t str_len = strlen(item->value.string) + 1;
+				fwrite(&str_len, sizeof(size_t), 1, file);
+				fwrite(item->value.string, sizeof(char), str_len, file);
+				break;
+			}
+			case CLEX_intlit:
+				fwrite(&item->value.int_number, sizeof(int64_t), 1, file);
+				break;
+			case CLEX_floatlit:
+				fwrite(&item->value.real_number, sizeof(double), 1, file);
+				break;
+			default:
+				break;
+            }
+        }
+    }
+
+    fclose(file);
+    printf("[INFO] Saved %zu pairs to %s\n", pair_count, path);
+}
+
+void parse_code_load(const char *path) {
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) {
+        fprintf(stderr, "[ERROR] Failed to open file for loading: %s\n", path);
+        return;
+    }
+
+    size_t pair_count;
+    fread(&pair_count, sizeof(size_t), 1, file);
+
+    for (size_t i = 0; i < pair_count; ++i) {
+        Pair *pair = malloc(sizeof(Pair));
+
+        fread(&pair->item_id, sizeof(size_t), 1, file);
+
+        for (int j = 0; j < 2; ++j) {
+            Item *item = malloc(sizeof(Item));
+            fread(&item->id, sizeof(size_t), 1, file);
+            fread(&item->value.token, sizeof(int), 1, file);
+
+            switch (item->value.token) {
+			case CLEX_id:
+			case CLEX_dqstring:
+			case CLEX_sqstring: {
+				size_t str_len;
+				fread(&str_len, sizeof(size_t), 1, file);
+				item->value.string = malloc(str_len);
+				fread(item->value.string, sizeof(char), str_len, file);
+				break;
+			}
+			case CLEX_intlit:
+				fread(&item->value.int_number, sizeof(int64_t), 1, file);
+				break;
+			case CLEX_floatlit:
+				fread(&item->value.real_number, sizeof(double), 1, file);
+				break;
+			default:
+				item->value.string = NULL;
+				break;
+            }
+
+            if (j == 0) {
+                pair->a = item;
+            } else {
+                pair->b = item;
+            }
+        }
+
+        arrput(global_pairs, pair);
+    }
+
+    fclose(file);
+    printf("[INFO] Loaded %zu pairs from %s\n", pair_count, path);
+}
+
+void parse_code_free() {
+	for(size_t i = 0; i < arrlenu(global_items); ++i)
+		free_item(global_items[i]);
+	arrfree(global_items);
+
+	printf("[INFO] Clean up all global items.\n");
+
+	for(size_t i = 0; i < arrlenu(global_pairs); ++i)
+		free(global_pairs[i]);
+	arrfree(global_pairs);
+
+	printf("[INFO] Clean up all global pairs.\n");
 }
