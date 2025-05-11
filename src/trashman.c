@@ -284,9 +284,13 @@ int compare_size_t_desc(const void *a, const void *b) {
     return (*(size_t *)b - *(size_t *)a);
 }
 
-int parse_code(char *path) {
+int bpe_parse(char *path) {
 	var_count = 0;
 	printf("[INFO] Processing %s file.\n", path);
+
+	//
+	// Loading javascript file.
+	//
 
 	FILE *file = fopen(path, "r");
 	if(file == NULL) {
@@ -419,7 +423,7 @@ int parse_code(char *path) {
 		size_t m_freq = 2, freq = 0, p1 = 0, p2 = 1, match_count = 0;
 		while(p2 < arrlenu(items)) {
 			//
-			// NOTE: Each pair will be freed by parse_code_free()
+			// NOTE: Each pair will be freed by bpe_free()
 			//
 			arrsetlen(match_indexes, 0);
 
@@ -486,7 +490,7 @@ int parse_code(char *path) {
 	arrfree(merged_pairs);
 
 	//
-	// NOTE: Each item will be freed by parse_code_free()
+	// NOTE: Each item will be freed by bpe_free()
 	//
 	arrfree(items);
 	free(code_output);
@@ -496,7 +500,7 @@ int parse_code(char *path) {
 	return 0;
 }
 
-void parse_code_print(size_t print_all) {
+void bpe_print(size_t print_all) {
 	if(print_all > 0) {
 		for(size_t i = 0; i < arrlenu(global_pairs); ++i) {
 			print_item(global_pairs[i]->a);
@@ -508,7 +512,7 @@ void parse_code_print(size_t print_all) {
 	printf("\n Totally %zu pairs\n", arrlenu(global_pairs));
 }
 
-void parse_code_save(const char *path) {
+void bpe_save(const char *path) {
     FILE *file = fopen(path, "wb");
     if (file == NULL) {
         fprintf(stderr, "[ERROR] Failed to open file for saving: %s\n", path);
@@ -553,7 +557,7 @@ void parse_code_save(const char *path) {
     printf("[INFO] Saved %zu pairs to %s\n", pair_count, path);
 }
 
-void parse_code_load(const char *path) {
+void bpe_load(const char *path) {
     FILE *file = fopen(path, "rb");
     if (file == NULL) {
         fprintf(stderr, "[ERROR] Failed to open file for loading: %s\n", path);
@@ -608,7 +612,7 @@ void parse_code_load(const char *path) {
     printf("[INFO] Loaded %zu pairs from %s\n", pair_count, path);
 }
 
-void parse_code_free() {
+void bpe_free() {
 	for(size_t i = 0; i < arrlenu(global_items); ++i)
 		free_item(global_items[i]);
 	arrfree(global_items);
@@ -620,4 +624,59 @@ void parse_code_free() {
 	arrfree(global_pairs);
 
 	printf("[INFO] Clean up all global pairs.\n");
+}
+
+size_t bpe_test(char *input) {
+	size_t input_len = strlen(input);
+	Item **items = NULL;
+
+	stb_lexer lexer;
+	char string_store[1028];
+	stb_c_lexer_init(&lexer, input, input + input_len, string_store, sizeof(string_store));
+
+	int token = stb_c_lexer_get_token(&lexer);
+	while(token != 0) {
+		if(lexer.token == CLEX_parse_error) {
+			fprintf(stderr, "[ERROR] Parse error.\n");
+			for(size_t i = 0; i < arrlenu(items); ++i)
+				free_item(items[i]);
+			arrfree(items);
+			break;
+		} else {
+			Item *itm = malloc(sizeof(Item));
+			itm->left = NULL;
+			itm->right = NULL;
+			itm->value.string = NULL;
+			copy_into_item(itm, &lexer);
+			arrput(items, itm);
+		}
+		token = stb_c_lexer_get_token(&lexer);
+	}
+
+	if(arrlenu(items) < 2) {
+		fprintf(stderr, "[ERROR] Not enough tokens.\n");
+		for(size_t i = 0; i < arrlenu(items); ++i)
+			free_item(items[i]);
+		arrfree(items);
+		return 1;
+	}
+
+	//
+	// Find next token based on last token.
+	//
+	Item *last_item = items[arrlenu(items) - 1];
+	for(size_t i = 0; i < arrlenu(global_pairs); ++i) {
+		if(items_equal(last_item, global_pairs[i]->a)) {
+			print_item(global_pairs[i]->b);
+			break;
+		}
+	}
+
+	//
+	// Cleanup
+	//
+	for(size_t i = 0; i < arrlenu(items); ++i)
+		free_item(items[i]);
+	arrfree(items);
+	return 0;
 }
