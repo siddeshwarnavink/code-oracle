@@ -9,6 +9,8 @@ Utilities
 
 - `copypasta` - Web scrape code.
 - `trashman` - Generate BPE translation table from the code.
+- `jiraiya` - Train the RNN-LSTM model.
+- `oracle' - Code oracle which predicts the code.
 
 Requirements
 =========

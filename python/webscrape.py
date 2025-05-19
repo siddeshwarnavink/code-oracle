@@ -2,19 +2,10 @@ import os
 import time
 import pathlib
 import shutil
-import ctypes
 import uuid
 
-from shared import cstr, dataset_dir, links_url, links_file_path
-
-# Load library
-copypasta = ctypes.CDLL("./.build/libcopypasta.so")
-
-copypasta.gfg_table_links.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
-copypasta.gfg_table_links.restype = ctypes.c_int
-
-copypasta.gfg_scrape.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
-copypasta.gfg_scrape.restype = ctypes.c_int
+from config import dataset_dir, links_url, links_file_path
+from copypasta import gfg_table_links, gfg_scrape
 
 # Initialization
 start = time.time()
@@ -28,7 +19,7 @@ print("[INFO] Creating dataset directory")
 os.mkdir(dataset_dir)
 
 # Web scrape URL list
-result = copypasta.gfg_table_links(cstr(links_url), cstr(links_file_path))
+result = gfg_table_links(links_url, links_file_path)
 if result == 1:
     quit()
 
@@ -38,7 +29,7 @@ with open(links_file_path, "r") as file:
     for link in file:
         clean_link = link.strip()
         out_file = os.path.join(dataset_dir, str(uuid.uuid1()) + ".js")
-        result = copypasta.gfg_scrape(cstr(clean_link), cstr(out_file))
+        result = gfg_scrape(clean_link, out_file)
         if result == 1:
             print("[INFO] Webpage skipped")
         else:

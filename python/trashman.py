@@ -1,17 +1,36 @@
 import ctypes
+from shared import cstr, cuint
 
-trashman = ctypes.CDLL("./.build/libtrashman.so")
+lib = ctypes.CDLL("./.build/libtrashman.so")
 
-trashman.bpe_parse.argtypes = [ctypes.c_char_p]
-trashman.bpe_parse.restype = ctypes.c_int
+lib.bpe_parse.argtypes = [ctypes.c_char_p]
+lib.bpe_parse.restype = ctypes.c_int
 
-trashman.bpe_print.argtypes = [ctypes.c_size_t]
+lib.bpe_save.argtypes = [ctypes.c_char_p]
 
-trashman.bpe_save.argtypes = [ctypes.c_char_p]
+lib.bpe_load.argtypes = [ctypes.c_char_p]
+lib.bpe_load.restype = ctypes.c_size_t
 
-trashman.bpe_load.argtypes = [ctypes.c_char_p]
+lib.bpe_test.argtypes = [ctypes.c_char_p]
+lib.bpe_test.restype = ctypes.c_int
 
-trashman.bpe_test.argtypes = [ctypes.c_char_p]
-trashman.bpe_test.restype = ctypes.c_int
+lib.bpe_free.argtypes = []
 
-trashman.bpe_free.argtypes = []
+# --------------------------
+# Python wrapper functions
+# --------------------------
+
+def bpe_parse(path: str) -> int:
+    return lib.bpe_parse(cstr(path))
+
+def bpe_save(path: str):
+    lib.bpe_save(cstr(path))
+
+def bpe_load(path: str) -> int:
+    return lib.bpe_load(cstr(path))
+
+def bpe_test(input: str) -> int:
+    return lib.bpe_test(cstr(path))
+
+def bpe_free():
+    lib.bpe_free()

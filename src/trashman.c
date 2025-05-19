@@ -108,11 +108,9 @@ void free_item(Item *itm) {
 
 void print_item(Item *itm) {
 	if(itm->left != NULL && itm->right != NULL) {
-		printf("(");
 		print_item(itm->left);
 		printf(" ");
 		print_item(itm->right);
-		printf(")");
 	} else {
 		switch(itm->value.token) {
 		case CLEX_id:
@@ -455,8 +453,9 @@ int bpe_parse(char *path) {
 				arrput(merged_pairs, *p);
 				arrput(global_pairs, p);
 
-				// Process match_indexes in reverse order to avoid index
-				// invalidation
+				//
+				// NOTE: Process match_indexes in reverse order to avoid index invalidation
+				//
 				qsort(match_indexes, arrlenu(match_indexes), sizeof(size_t), compare_size_t_desc);
 
 				for(size_t i = 0; i < arrlenu(match_indexes); ++i) {
@@ -498,18 +497,6 @@ int bpe_parse(char *path) {
 	printf("[INFO] File processing done.\n");
 
 	return 0;
-}
-
-void bpe_print(size_t print_all) {
-	if(print_all > 0) {
-		for(size_t i = 0; i < arrlenu(global_pairs); ++i) {
-			print_item(global_pairs[i]->a);
-			printf(" and ");
-			print_item(global_pairs[i]->b);
-			printf("\n");
-		}
-	}
-	printf("\n Totally %zu pairs\n", arrlenu(global_pairs));
 }
 
 void bpe_save(const char *path) {
@@ -557,15 +544,16 @@ void bpe_save(const char *path) {
     printf("[INFO] Saved %zu pairs to %s\n", pair_count, path);
 }
 
-void bpe_load(const char *path) {
+int bpe_load(const char *path) {
     FILE *file = fopen(path, "rb");
     if (file == NULL) {
         fprintf(stderr, "[ERROR] Failed to open file for loading: %s\n", path);
-        return;
+        return -1;
     }
 
     size_t pair_count;
     fread(&pair_count, sizeof(size_t), 1, file);
+    printf("[INFO] Pair count %zu\n", pair_count);
 
     for (size_t i = 0; i < pair_count; ++i) {
         Pair *pair = malloc(sizeof(Pair));
@@ -610,6 +598,7 @@ void bpe_load(const char *path) {
 
     fclose(file);
     printf("[INFO] Loaded %zu pairs from %s\n", pair_count, path);
+    return pair_count;
 }
 
 void bpe_free() {
