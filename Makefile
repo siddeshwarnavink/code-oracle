@@ -6,7 +6,7 @@ BUILD_DIR = .build
 SRC_DIR = src
 LIB_DIR = lib
 
-all: $(BUILD_DIR)/libcopypasta.so $(BUILD_DIR)/libtrashman.so
+all: $(BUILD_DIR)/libcopypasta.so $(BUILD_DIR)/libtrashman.so $(BUILD_DIR)/libjiraiya.so
 
 $(BUILD_DIR)/libcopypasta.so:
 	mkdir -p $(BUILD_DIR)
@@ -15,6 +15,10 @@ $(BUILD_DIR)/libcopypasta.so:
 $(BUILD_DIR)/libtrashman.so:
 	mkdir -p $(BUILD_DIR)
 	$(CC) src/trashman.c -o $(BUILD_DIR)/libtrashman.so $(CFLAGS) $(LDFLAGS)
+
+$(BUILD_DIR)/libjiraiya.so:
+	mkdir -p $(BUILD_DIR)
+	$(CC) src/jiraiya.c -o $(BUILD_DIR)/libjiraiya.so $(CFLAGS) $(LDFLAGS)
 
 clean:
 	rm -rf $(BUILD_DIR)

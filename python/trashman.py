@@ -30,7 +30,7 @@ def bpe_load(path: str) -> int:
     return lib.bpe_load(cstr(path))
 
 def bpe_test(input: str) -> int:
-    return lib.bpe_test(cstr(path))
+    return lib.bpe_test(cstr(input))
 
 def bpe_free():
     lib.bpe_free()

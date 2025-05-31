@@ -1,10 +1,10 @@
 import os
 import ctypes
 
-from shared import cstr, dataset_dir
-from trashman import trashman
+from config import dataset_dir
+from trashman import bpe_load, bpe_test, bpe_free 
 
-trashman.bpe_load(cstr(os.path.join(dataset_dir, "bpe.bin")))
+bpe_load(os.path.join(dataset_dir, "bpe.bin"))
 
 print("Type 'exit' to quit")
 while True:
@@ -14,10 +14,10 @@ while True:
             continue
         elif inp == "exit":
             break
-        result = trashman.bpe_test(cstr(inp))
+        result = bpe_test(inp)
         if result == 1:
             print("An Error occured!")
     except KeyboardInterrupt:
         break
 
-trashman.bpe_free()
+bpe_free()
