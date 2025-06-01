@@ -7,3 +7,4 @@ links_url = "https://www.geeksforgeeks.org/reactjs-projects/"
 links_file_path = os.path.join(dataset_dir, "links.txt")
 
 bpe_path = os.path.join(output_dir, "bpe.bin")
+model_path = os.path.join(output_dir, 'model.bin')

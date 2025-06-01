@@ -1,7 +1,7 @@
 import os
 import ctypes
 
-from config import bpe_path
+from config import bpe_path, model_path
 from trashman import bpe_load, bpe_free
 from jiraiya import rnn
 
@@ -20,7 +20,7 @@ sequence_length = 32
 
 tokens_count = bpe_load(bpe_path)
 
-if rnn(tokens_count, embedding_dim, hidden_layers, epochs) > 0:
+if rnn(tokens_count, embedding_dim, hidden_layers, epochs, model_path) > 0:
     print("Training model failed!")
 
 bpe_free()

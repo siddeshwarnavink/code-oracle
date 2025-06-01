@@ -18,7 +18,7 @@ $(BUILD_DIR)/libtrashman.so:
 
 $(BUILD_DIR)/libjiraiya.so:
 	mkdir -p $(BUILD_DIR)
-	$(CC) src/jiraiya.c -o $(BUILD_DIR)/libjiraiya.so $(CFLAGS) $(LDFLAGS)
+	$(CC) src/jiraiya.c src/trashman.c -o $(BUILD_DIR)/libjiraiya.so $(CFLAGS) $(LDFLAGS)
 
 clean:
 	rm -rf $(BUILD_DIR)

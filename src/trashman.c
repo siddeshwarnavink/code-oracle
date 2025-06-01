@@ -4,25 +4,12 @@
 #include <assert.h>
 #include <stdint.h>
 
-#define STB_C_LEXER_IMPLEMENTATION
-#define STB_DS_IMPLEMENTATION
-#include "stb_c_lexer.h"
-#include "stb_ds.h"
 #include "tree_sitter/api.h"
 #include "tree-sitter-javascript.h"
 
-typedef struct Item {
-	size_t id; // Only for nested items.
-	struct Item *left;
-	struct Item *right;
-	stb_lexer value;
-} Item;
-
-typedef struct Pair {
-	Item *a;
-	Item *b;
-	size_t item_id;
-} Pair;
+#define STB_C_LEXER_IMPLEMENTATION
+#define STB_DS_IMPLEMENTATION
+#include "trashman.h"
 
 typedef struct StringChanges {
 	size_t start;
@@ -64,7 +51,7 @@ size_t tokens_equal(stb_lexer a, stb_lexer b) {
 	return 0;
 }
 
-size_t items_equal(Item *a, Item *b) {
+int items_equal(Item *a, Item *b) {
 	if (a == NULL || b == NULL) {
 		assert(1);
 	}
@@ -605,12 +592,14 @@ void bpe_free() {
 	for(size_t i = 0; i < arrlenu(global_items); ++i)
 		free_item(global_items[i]);
 	arrfree(global_items);
+	global_items = NULL; // Prevent double free
 
 	printf("[INFO] Clean up all global items.\n");
 
 	for(size_t i = 0; i < arrlenu(global_pairs); ++i)
 		free(global_pairs[i]);
 	arrfree(global_pairs);
+	global_pairs = NULL; // Prevent double free
 
 	printf("[INFO] Clean up all global pairs.\n");
 }
@@ -668,4 +657,28 @@ size_t bpe_test(char *input) {
 		free_item(items[i]);
 	arrfree(items);
 	return 0;
+}
+
+// Return the string for a given BPE token id (from global_items)
+const char* bpe_token_string(size_t id) {
+    if (!global_items) return NULL;
+    for (size_t i = 0; i < arrlenu(global_items); ++i) {
+        if (global_items[i]->id == id) {
+            if (global_items[i]->value.string)
+                return global_items[i]->value.string;
+            // For non-string tokens, return a static buffer
+            static char buf[32];
+            switch(global_items[i]->value.token) {
+                case CLEX_intlit:
+                    snprintf(buf, sizeof(buf), "%ld", global_items[i]->value.int_number);
+                    return buf;
+                case CLEX_floatlit:
+                    snprintf(buf, sizeof(buf), "%f", global_items[i]->value.real_number);
+                    return buf;
+                default:
+                    return "<UNK>";
+            }
+        }
+    }
+    return "<UNK>";
 }

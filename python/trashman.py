@@ -15,6 +15,8 @@ lib.bpe_test.argtypes = [ctypes.c_char_p]
 lib.bpe_test.restype = ctypes.c_int
 
 lib.bpe_free.argtypes = []
+lib.bpe_token_string.argtypes = [ctypes.c_size_t]
+lib.bpe_token_string.restype = ctypes.c_char_p
 
 # --------------------------
 # Python wrapper functions
@@ -34,3 +36,7 @@ def bpe_test(input: str) -> int:
 
 def bpe_free():
     lib.bpe_free()
+
+def bpe_token_string(token_id: int) -> str:
+    s = lib.bpe_token_string(cuint(token_id))
+    return s.decode('utf-8') if s else '<UNK>'
